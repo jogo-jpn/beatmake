@@ -2,15 +2,12 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <!-- ▼ 確実にズームを禁止するmetaタグ ▼ -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-
-    <title>TUBE_SAMPLER</title>
+    <title>TUBE_SAMPLER2</title>
     <style>
-        /* ページ全体でタッチによるズームやデフォルト動作を完全に制限 */
         html {
             touch-action: none;
-            -webkit-text-size-adjust: 100%; /* iOSで勝手に文字が拡大されるのを防止 */
+            -webkit-text-size-adjust: 100%;
         }
 
         body { 
@@ -34,26 +31,25 @@
             max-width: 320px; 
             height: 180px; 
             margin: 0 auto 6px auto; 
-            overflow: hidden; /* はみ出た部分を隠す */
+            overflow: hidden; 
             background: #000; 
             border-radius: 4px; 
             display: block; 
             position: relative;
         }
 
-        /* iframeを少し拡大して、上下左右のYouTubeの文字やマークを枠の外に追い出す */
         #player-wrapper iframe { 
             width: 100%; 
             height: 100%; 
             border: 0; 
             position: absolute;
-            top: -50px;     /* 上部のタイトルやアイコンを隠す */
+            top: -50px;
             left: 0;
-            height: calc(100% + 100px); /* 縮んだ分を補正 */
+            height: calc(100% + 100px); 
             pointer-events: none; 
         }
 
-        /* ▼▼▼ 一時停止マークや勝手なクリックを完全にブロックするカバー ▼▼▼ */
+        /* ▼▼▼ 一時停止マーク等を完全に隠すための不透明（または半透明の黒）カバーに変更 ▼▼▼ */
         #player-cover {
             position: absolute;
             top: 0;
@@ -61,13 +57,12 @@
             width: 100%;
             height: 100%;
             z-index: 10;
-            background: transparent;
+            background: rgba(0, 0, 0, 0.01); /* ほぼ完全な透明ですが、YouTubeのレイヤーを強制的に下に抑え込みます */
         }
 
         .control-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; gap: 6px; }
         #current-time { font-family: monospace; font-size: 0.9rem; color: #ff9900; font-weight: bold; white-space: nowrap; }
         
-        /* ▼▼▼ タイムシークバーのスタイル ▼▼▼ */
         .seek-container { margin-bottom: 6px; display: flex; align-items: center; }
         #seek-slider { width: 100%; accent-color: #ff9900; cursor: pointer; }
 
@@ -98,10 +93,9 @@
         </div>
         <div id="player-wrapper">
             <div id="player"></div>
-            <div id="player-cover"></div> <!-- 一時停止マークやクリックをブロックするカバー -->
+            <div id="player-cover"></div> <!-- 一時停止マークなどを手前でシャットアウトするカバー -->
         </div>
         
-        <!-- タイムシークバー -->
         <div class="seek-container">
             <input type="range" id="seek-slider" min="0" max="100" value="0" step="0.1">
         </div>
@@ -121,10 +115,9 @@
         let player = null, timestamps = new Array(16).fill(null), padCooldowns = new Array(16).fill(false), audioCtx = null;
         const keyMap = ['1','2','3','4','q','w','e','r','a','s','d','f','z','x','c','v'];
         let isDragging = false, startY = 0, dragTargetIndex = null, baseTimestamp = 0, pressTimer = null, soundDuration = 0.04, mockWaveData = [];
-        let isSeeking = false; // シークバー操作中フラグ
+        let isSeeking = false;
 
         window.addEventListener('DOMContentLoaded', () => {
-            // ダブルタップによるズームを阻止
             let lastTouchEnd = 0;
             document.addEventListener('touchend', (e) => {
                 let now = (new Date()).getTime();
@@ -147,7 +140,6 @@
                 `;
             }
 
-            // スライダーの値変更をsoundDurationに連動
             const responseSlider = document.getElementById('response-slider');
             if (responseSlider) {
                 soundDuration = parseFloat(responseSlider.value);
@@ -156,7 +148,6 @@
                 });
             }
 
-            // ▼▼▼ タイムシークバーの操作イベント ▼▼▼
             const seekSlider = document.getElementById('seek-slider');
             seekSlider.addEventListener('input', () => {
                 isSeeking = true;
@@ -255,7 +246,6 @@
                 p.querySelector('span').innerText = `[${keyMap[i].toUpperCase()}] EMPTY`;
             }));
 
-            // キーボード操作対応
             window.addEventListener('keydown', (e) => {
                 if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
                 if (e.repeat) return;
@@ -291,12 +281,12 @@
                 videoId: videoId,
                 playerVars: { 
                     'playsinline': 1,
-                    'controls': 0,        /* コントローラー非表示 */
-                    'disablekb': 1,       /* キーボード無効 */
-                    'fs': 0,              /* フルスクリーンボタン非表示 */
-                    'modestbranding': 1,  /* YouTubeロゴ最小限 */
-                    'iv_load_policy': 3,  /* 動画内のアノテーションやインフォカードを非表示 */
-                    'rel': 0              /* 関連動画を非表示にする */
+                    'controls': 0,
+                    'disablekb': 1,
+                    'fs': 0,
+                    'modestbranding': 1,
+                    'iv_load_policy': 3,
+                    'rel': 0
                 },
                 events: { 
                     'onReady': () => {
