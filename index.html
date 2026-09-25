@@ -24,6 +24,11 @@
         .container { background-color: #151515; padding: 10px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
         .input-group { margin-bottom: 6px; display: flex; gap: 6px; }
         input[type="text"] { flex: 1; padding: 6px; border: 1px solid #333; border-radius: 4px; background-color: #222; color: #fff; font-size: 0.8rem; }
+        
+        /* ファイル選択ボタンのスタイル調整 */
+        .file-input-wrapper { flex: 1; display: flex; align-items: center; background-color: #222; border: 1px solid #333; border-radius: 4px; padding: 0 6px; font-size: 0.8rem; color: #aaa; overflow: hidden; }
+        .file-input-wrapper input[type="file"] { width: 100%; color: #fff; font-size: 0.75rem; }
+
         button, select { padding: 6px 10px; border: none; border-radius: 4px; background-color: #ff9900; color: #121212; font-weight: bold; cursor: pointer; font-size: 0.8rem; }
         select { background-color: #ff9900; color: #121212; }
         
@@ -39,13 +44,19 @@
             position: relative;
         }
 
-        #player-wrapper iframe { 
+        /* YouTube用iframeとローカル用videoタグの共通スタイル */
+        #player-wrapper iframe, #player-wrapper video { 
             width: 100%; 
             height: 100%; 
             border: 0; 
             position: absolute;
-            top: -50px;
+            top: 0;
             left: 0;
+            object-fit: contain;
+        }
+        
+        #player-wrapper iframe {
+            top: -50px;
             height: calc(100% + 100px); 
             pointer-events: none; 
         }
@@ -76,12 +87,20 @@
 </head>
 <body>
 
-    <h1>TUBE SAMPLER3</h1>
+    <h1>TUBE SAMPLER</h1>
     <div class="container">
+        <!-- 既存のYouTube用入力 -->
         <div class="input-group">
             <input type="text" id="youtube-url" placeholder="YouTube URL" value="https://youtu.be/BdOoIbmLQFM?si=WkiizxmRSffk_BpZ">
             <button id="load-btn">LOAD</button>
         </div>
+        <!-- カメラロール（ファイル）からの読み込み用入力 -->
+        <div class="input-group">
+            <div class="file-input-wrapper">
+                <input type="file" id="local-file-input" accept="video/*">
+            </div>
+        </div>
+
         <div id="player-wrapper">
             <div id="player"></div>
         </div>
@@ -93,7 +112,6 @@
         <div class="controls">
             <div class="control-row">
                 <div>TIME: <span id="current-time">0.00</span>s</div>
-                <!-- ▼▼▼ 再生速度選択のドロップダウンを追加 ▼▼▼ -->
                 <select id="speed-select">
                     <option value="0.25">0.25x</option>
                     <option value="0.5">0.5x</option>
@@ -113,7 +131,8 @@
     </div>
 
     <script>
-        let player = null, timestamps = new Array(16).fill(null), padCooldowns = new Array(16).fill(false), audioCtx = null;
+        let player = null, localVideo = null, isLocalMode = false;
+        let timestamps = new Array(16).fill(null), padCooldowns = new Array(16).fill(false), audioCtx = null;
         const keyMap = ['1','2','3','4','q','w','e','r','a','s','d','f','z','x','c','v'];
         let isDragging = false, startY = 0, dragTargetIndex = null, baseTimestamp = 0, pressTimer = null, soundDuration = 0.04, mockWaveData = [];
         let isSeeking = false;
@@ -141,10 +160,13 @@
                 `;
             }
 
-            // 再生速度変更のイベントリスナー
+            // 再生速度変更
             document.getElementById('speed-select').addEventListener('change', (e) => {
-                if (player && player.setPlaybackRate) {
-                    player.setPlaybackRate(parseFloat(e.target.value));
+                let speed = parseFloat(e.target.value);
+                if (isLocalMode && localVideo) {
+                    localVideo.playbackRate = speed;
+                } else if (player && player.setPlaybackRate) {
+                    player.setPlaybackRate(speed);
                 }
             });
 
@@ -159,25 +181,37 @@
             const seekSlider = document.getElementById('seek-slider');
             seekSlider.addEventListener('input', () => {
                 isSeeking = true;
-                if (player && player.getDuration) {
-                    let targetTime = (seekSlider.value / 100) * player.getDuration();
+                let dur = getDuration();
+                if (dur > 0) {
+                    let targetTime = (seekSlider.value / 100) * dur;
                     document.getElementById('current-time').innerText = targetTime.toFixed(2);
                 }
             });
             seekSlider.addEventListener('change', () => {
-                if (player && player.getDuration) {
-                    let targetTime = (seekSlider.value / 100) * player.getDuration();
-                    player.seekTo(targetTime, true);
-                    player.playVideo();
+                let dur = getDuration();
+                if (dur > 0) {
+                    let targetTime = (seekSlider.value / 100) * dur;
+                    seekTo(targetTime);
+                    playVideo();
                 }
                 isSeeking = false;
             });
 
+            // YouTube読み込みボタン
             document.getElementById('load-btn').addEventListener('click', () => {
                 const url = document.getElementById('youtube-url').value;
                 const videoId = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/))([^&?]+)/)?.[1];
-                if (videoId) initPlayer(videoId);
+                if (videoId) initYouTubePlayer(videoId);
                 else alert("正しいYouTube URLを入力してください");
+            });
+
+            // カメラロール（ローカルファイル）選択時の処理
+            document.getElementById('local-file-input').addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const fileURL = URL.createObjectURL(file);
+                    initLocalPlayer(fileURL);
+                }
             });
 
             document.querySelectorAll('.pad').forEach(pad => {
@@ -195,8 +229,8 @@
                     }, 500);
 
                     if (timestamps[index] === null) {
-                        if (player?.getCurrentTime) {
-                            let t = player.getCurrentTime();
+                        let t = getCurrentTime();
+                        if (t !== null) {
                             timestamps[index] = t;
                             const el = document.getElementById(`pad-${index}`);
                             el.classList.remove('empty'); el.classList.add('set');
@@ -225,8 +259,8 @@
                 if (pressTimer) clearTimeout(pressTimer);
                 if (dragTargetIndex !== null) {
                     document.getElementById(`pad-${dragTargetIndex}`).classList.remove('tweaking');
-                    player?.seekTo(timestamps[dragTargetIndex], true);
-                    player?.playVideo();
+                    seekTo(timestamps[dragTargetIndex]);
+                    playVideo();
                     dragTargetIndex = null;
                 }
                 isDragging = false;
@@ -266,8 +300,8 @@
                     if (padCooldowns[keyIndex]) return;
 
                     if (timestamps[keyIndex] === null) {
-                        if (player?.getCurrentTime) {
-                            let t = player.getCurrentTime();
+                        let t = getCurrentTime();
+                        if (t !== null) {
                             timestamps[keyIndex] = t;
                             const el = document.getElementById(`pad-${keyIndex}`);
                             el.classList.remove('empty'); el.classList.add('set');
@@ -283,46 +317,70 @@
                     setTimeout(() => padCooldowns[keyIndex] = false, 50);
                 }
             });
+
+            // 定期的な画面更新ループ
+            setInterval(() => {
+                let currentTime = getCurrentTime();
+                let duration = getDuration();
+                if (currentTime !== null) {
+                    document.getElementById('current-time').innerText = currentTime.toFixed(2);
+                    if (!isDragging && !isSeeking && duration > 0) {
+                        document.getElementById('seek-slider').value = (currentTime / duration) * 100;
+                    }
+                }
+            }, 100);
         });
 
-        function initPlayer(videoId) {
-            if (player) player.destroy();
+        // 共通操作用ヘルパー関数
+        function getCurrentTime() {
+            if (isLocalMode && localVideo) return localVideo.currentTime;
+            if (player && player.getCurrentTime) return player.getCurrentTime();
+            return null;
+        }
+        function getDuration() {
+            if (isLocalMode && localVideo) return localVideo.duration;
+            if (player && player.getDuration) return player.getDuration();
+            return 0;
+        }
+        function seekTo(sec) {
+            if (isLocalMode && localVideo) localVideo.currentTime = sec;
+            else if (player && player.seekTo) player.seekTo(sec, true);
+        }
+        function playVideo() {
+            if (isLocalMode && localVideo) localVideo.play().catch(()=>{});
+            else if (player && player.playVideo) player.playVideo();
+        }
+
+        function initYouTubePlayer(videoId) {
+            isLocalMode = false;
+            const wrapper = document.getElementById('player-wrapper');
+            wrapper.innerHTML = '<div id="player"></div>';
+            
             player = new YT.Player('player', {
                 videoId: videoId,
-                playerVars: { 
-                    'playsinline': 1,
-                    'controls': 0,
-                    'disablekb': 1,
-                    'fs': 0,
-                    'modestbranding': 1,
-                    'iv_load_policy': 3,
-                    'rel': 0
-                },
+                playerVars: { 'playsinline': 1, 'controls': 0, 'disablekb': 1, 'fs': 0, 'modestbranding': 1, 'iv_load_policy': 3, 'rel': 0 },
                 events: { 
                     'onReady': (event) => {
                         event.target.playVideo();
-                        // 読み込み時にセレクトボックスで選ばれている速度を適用
-                        const currentSpeed = parseFloat(document.getElementById('speed-select').value);
-                        event.target.setPlaybackRate(currentSpeed);
-
-                        setInterval(() => {
-                            if (!player || !player.getCurrentTime) return;
-                            
-                            if (player.getPlayerState && player.getPlayerState() === 2) {
-                                player.playVideo();
-                            }
-
-                            if (!isDragging && !isSeeking) {
-                                let currentTime = player.getCurrentTime();
-                                let duration = player.getDuration();
-                                document.getElementById('current-time').innerText = currentTime.toFixed(2);
-                                if (duration > 0) {
-                                    document.getElementById('seek-slider').value = (currentTime / duration) * 100;
-                                }
-                            }
-                        }, 100);
+                        const speed = parseFloat(document.getElementById('speed-select').value);
+                        event.target.setPlaybackRate(speed);
                     } 
                 }
+            });
+        }
+
+        function initLocalPlayer(fileURL) {
+            isLocalMode = true;
+            if (player) { player.destroy(); player = null; }
+            
+            const wrapper = document.getElementById('player-wrapper');
+            wrapper.innerHTML = `<video id="local-video" playsinline webkit-playsinline></video>`;
+            localVideo = document.getElementById('local-video');
+            localVideo.src = fileURL;
+            
+            localVideo.addEventListener('loadedmetadata', () => {
+                localVideo.play().catch(()=>{});
+                localVideo.playbackRate = parseFloat(document.getElementById('speed-select').value);
             });
         }
 
@@ -330,10 +388,8 @@
             playAttackSound();
             const el = document.getElementById(`pad-${index}`);
             el.classList.add('active'); setTimeout(() => el.classList.remove('active'), 40);
-            try { 
-                player.seekTo(timestamps[index], true); 
-                player.playVideo(); 
-            } catch (e) {}
+            seekTo(timestamps[index]);
+            playVideo();
         }
 
         function playAttackSound() {
